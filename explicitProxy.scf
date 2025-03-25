@@ -1,60 +1,39 @@
 #TMSH-VERSION: 17.1.0
+# This sample configuration requires you first to provide: 
+#   The server TLS certificate and key from a trusted CA
+#   The trusted CA certificate for the server SSL certificate 
+#   The trusted CA certificate for the client SSL certificates
+#
+# For this sake of this configuration it assumes:
+#   The BIG-IP is deployed in 1-nic mode where the BIG-IP management and dataplane share an
+#   interface.
+#
+#   The names for each to be the following components are as follows:
+#       CA for server certificate:             
+#            cert /Common/proxy
+#            key /Common/proxy
+#            chain /Common/ca
+#
+#       client-cert-ca: 
+#           /Common/ca
+# Since these are all self generated and signed I used the same ca for issuing both the 
+# client and server certificates and keys
+# 
+# Once the above is complete and the locally significant fields [[indicated by double brackets]] 
+# below are changed, install this in '/var/local/scf/' and issue the following commands
+# load /sys config merge file <filename> verify
+#
+# If no errors then fully merge the file.
+# tmsh load /sys config merge file <filename> 
+# and
+# tmsh save /sys config
+#
+# To create your own CA and client and server certificates for testing
 
 cli admin-partitions {
     update-partition Common
 }
 
-ltm rule /Common/mTLSexplicit {
-when RULE_INIT {
-    set debug 1
-    set tag none
-}
-
-when CLIENTSSL_CLIENTCERT {
-    if {[SSL::cert 0] eq ""}{
-         reject 
-    } else { 
-        set cert [SSL::cert 0]
-        set sn [X509::serial_number $cert]
-        set subject [X509::subject $cert]
-        set issuer [X509::issuer $cert]
-        set version [X509::version $cert]
-        set subject [X509::subject [SSL::cert 0]]
-        array set subject_fields [split $subject ",="]
-        #log local0. "sn=$sn : cert=$cert
-        log local0. "subject $subject"
-        set fields [split $subject ","]
-        log local0. "Fields possibly CN= [lindex $fields 4]"
-        set cn [split [lindex $fields 4] "="]
-        log local0. "Fields possibly CN= [lindex $cn 1]"
-        set app [split [lindex $cn 1] "."]
-        log local0. "Fields possibly name [lindex $app 0]"
-        set group [string range [lindex $app 0] 0 2]
-        log local0. "Fields possibly group $group"
-    }
-}
-
-when HTTP_PROXY_REQUEST {
-    if { [HTTP::method] eq "CONNECT" } {
-        # Extract the destination from the request (host:port)
-        set destination [lindex [split [HTTP::uri] ":"] 0]
-        log local0. "Extracted destination: $destination"
-        
-        # Query the Data Group for the website name
-        set result [class match -value $destination eq $group]
-        
-        log local0. "result: $result"
-        
-        if { $result == "allow" } {
-        # Website is allowed, proceed with the request
-            log local0. "Allowed destination: $destination"
-        } else {
-        # Website is not allowed, block the request
-            reject
-        }
-    }
-}
-}
 ltm rule /Common/mtlsExplicit {
 when RULE_INIT {
   #set 1 to enable logging, 0 to disable
@@ -67,6 +46,11 @@ when CLIENTSSL_CLIENTCERT {
          reject 
     } else { 
         set subject [X509::subject [SSL::cert 0]]
+        # Set the group variable to the first 3 digits of the certificates
+        # This is controlled by the last statement '] 0 2 ]' below. If you wish to extend it 
+        # the lindex starts at the '0' character and ends at (n-1) characters you wish to extract
+        # For this you must also create a data group of allowed destinations where the datagroup
+        # name is the $group you are planning to match against ('app')
         set group [string range [lindex [split [lindex [split [lindex [split $subject ","] 4] "="] 1] "."] 0] 0 2]
         if {$static::debug}{ log local0. "Group name extracted from Subject CN= $group" }
     }
@@ -85,7 +69,7 @@ when HTTP_PROXY_REQUEST {
         # Website is allowed, proceed with the request
             if {$static::debug}{ log local0. "Allowed destination: $destination for Subject: $subject" }
         } else {
-        # Website is not allowed, block the request
+        # Website is not allowed, block the request and log the Client Certificate Subject and Destination
             log local0. "Denied destination: $destination for Subject: $subject"
             reject
         }
@@ -93,10 +77,8 @@ when HTTP_PROXY_REQUEST {
 }
 }
 ltm virtual /Common/explicitProxy {
-    creation-time 2025-03-19:14:01:54
     destination /Common/0.0.0.0:3128
     ip-protocol tcp
-    last-modified-time 2025-03-21:13:00:05
     mask any
     profiles {
         /Common/mtlsExplicit { }
@@ -149,7 +131,7 @@ ltm data-group internal /Common/app {
     type string
 }
 
-ltm profile client-ssl /Common/proxy.cloudsecurity.ninja {
+ltm profile client-ssl /Common/[[SSL PROFILE name]] {
     alert-timeout indefinite
     allow-dynamic-record-sizing disabled
     allow-expired-crl disabled
@@ -222,18 +204,11 @@ net dns-resolver /Common/everything {
     forward-zones {
         . {
             nameservers {
-                172.31.0.2:53 { }
+            [[DNS SERVER IP]]:53 { }
             }
         }
     }
     nameserver-min-rtt 500
     route-domain /Common/0
-}
-
-
-sys dns {
-    description configured-by-dhcp
-    name-servers { 172.31.0.2 }
-    search { us-west-2.compute.internal }
 }
 
