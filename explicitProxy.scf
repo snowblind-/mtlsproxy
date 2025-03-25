@@ -1,0 +1,239 @@
+#TMSH-VERSION: 17.1.0
+
+cli admin-partitions {
+    update-partition Common
+}
+
+ltm rule /Common/mTLSexplicit {
+when RULE_INIT {
+    set debug 1
+    set tag none
+}
+
+when CLIENTSSL_CLIENTCERT {
+    if {[SSL::cert 0] eq ""}{
+         reject 
+    } else { 
+        set cert [SSL::cert 0]
+        set sn [X509::serial_number $cert]
+        set subject [X509::subject $cert]
+        set issuer [X509::issuer $cert]
+        set version [X509::version $cert]
+        set subject [X509::subject [SSL::cert 0]]
+        array set subject_fields [split $subject ",="]
+        #log local0. "sn=$sn : cert=$cert
+        log local0. "subject $subject"
+        set fields [split $subject ","]
+        log local0. "Fields possibly CN= [lindex $fields 4]"
+        set cn [split [lindex $fields 4] "="]
+        log local0. "Fields possibly CN= [lindex $cn 1]"
+        set app [split [lindex $cn 1] "."]
+        log local0. "Fields possibly name [lindex $app 0]"
+        set group [string range [lindex $app 0] 0 2]
+        log local0. "Fields possibly group $group"
+    }
+}
+
+when HTTP_PROXY_REQUEST {
+    if { [HTTP::method] eq "CONNECT" } {
+        # Extract the destination from the request (host:port)
+        set destination [lindex [split [HTTP::uri] ":"] 0]
+        log local0. "Extracted destination: $destination"
+        
+        # Query the Data Group for the website name
+        set result [class match -value $destination eq $group]
+        
+        log local0. "result: $result"
+        
+        if { $result == "allow" } {
+        # Website is allowed, proceed with the request
+            log local0. "Allowed destination: $destination"
+        } else {
+        # Website is not allowed, block the request
+            reject
+        }
+    }
+}
+}
+ltm rule /Common/mtlsExplicit {
+when RULE_INIT {
+  #set 1 to enable logging, 0 to disable
+  set static::debug 1
+  set tag none
+}
+
+when CLIENTSSL_CLIENTCERT {
+    if {[SSL::cert 0] eq ""}{
+         reject 
+    } else { 
+        set subject [X509::subject [SSL::cert 0]]
+        set group [string range [lindex [split [lindex [split [lindex [split $subject ","] 4] "="] 1] "."] 0] 0 2]
+        if {$static::debug}{ log local0. "Group name extracted from Subject CN= $group" }
+    }
+}
+
+when HTTP_PROXY_REQUEST {
+    if { [HTTP::method] eq "CONNECT" } {
+        # Extract the destination from the request (host:port)
+        set destination [lindex [split [HTTP::uri] ":"] 0]
+        if {$static::debug}{ log local0. "Extracted destination: $destination" }
+        
+        # Query the Data Group for the website name
+        set result [class match -value $destination eq $group]
+        
+        if { $result == "allow" } {
+        # Website is allowed, proceed with the request
+            if {$static::debug}{ log local0. "Allowed destination: $destination for Subject: $subject" }
+        } else {
+        # Website is not allowed, block the request
+            log local0. "Denied destination: $destination for Subject: $subject"
+            reject
+        }
+    }
+}
+}
+ltm virtual /Common/explicitProxy {
+    creation-time 2025-03-19:14:01:54
+    destination /Common/0.0.0.0:3128
+    ip-protocol tcp
+    last-modified-time 2025-03-21:13:00:05
+    mask any
+    profiles {
+        /Common/mtlsExplicit { }
+        /Common/proxy.cloudsecurity.ninja {
+            context clientside
+        }
+        /Common/tcp { }
+    }
+    rules {
+        /Common/mtlsExplicit
+    }
+    serverssl-use-sni disabled
+    source 0.0.0.0/0
+    source-address-translation {
+        type automap
+    }
+    translate-address enabled
+    translate-port enabled
+}
+ltm virtual-address /Common/0.0.0.0 {
+    address any
+    arp disabled
+    icmp-echo disabled
+    mask any
+    traffic-group /Common/traffic-group-1
+}
+
+ltm cipher group /Common/explicitProxy {
+    allow {
+        /Common/f5-aes { }
+        /Common/f5-cc-stip { }
+        /Common/f5-default { }
+        /Common/f5-ecc { }
+        /Common/f5-fips { }
+        /Common/f5-quic { }
+        /Common/f5-secure { }
+    }
+    ordering speed
+}
+
+ltm data-group internal /Common/app {
+    records {
+        www.google.com {
+            data allow
+        }
+        www.https.com {
+            data allow
+        }
+    }
+    type string
+}
+
+ltm profile client-ssl /Common/proxy.cloudsecurity.ninja {
+    alert-timeout indefinite
+    allow-dynamic-record-sizing disabled
+    allow-expired-crl disabled
+    allow-non-ssl disabled
+    app-service none
+    authenticate once
+    authenticate-depth 9
+    ca-file /Common/ca
+    cache-size 262144
+    cache-timeout 3600
+    cert-key-chain {
+        proxy_ca_0 {
+            cert /Common/proxy
+            chain /Common/ca
+            key /Common/proxy
+        }
+    }
+    cipher-group /Common/explicitProxy
+    ciphers none
+    client-cert-ca /Common/ca
+    crl none
+    crl-file none
+    data-0rtt disabled
+    defaults-from /Common/clientssl
+    generic-alert enabled
+    handshake-timeout 10
+    inherit-ca-certkeychain true
+    inherit-certkeychain false
+    max-active-handshakes indefinite
+    max-aggregate-renegotiation-per-minute indefinite
+    max-renegotiations-per-minute 5
+    maximum-record-size 16384
+    mod-ssl-methods disabled
+    mode enabled
+    notify-cert-status-to-virtual-server disabled
+    ocsp-stapling disabled
+    options { dont-insert-empty-fragments no-dtlsv1.2 }
+    peer-cert-mode require
+    peer-no-renegotiate-timeout 10
+    proxy-ssl disabled
+    proxy-ssl-passthrough disabled
+    renegotiate-max-record-delay indefinite
+    renegotiate-period indefinite
+    renegotiate-size indefinite
+    renegotiation enabled
+    retain-certificate true
+    secure-renegotiation require
+    server-name none
+    session-mirroring disabled
+    session-ticket disabled
+    session-ticket-timeout 0
+    sni-default false
+    sni-require false
+    ssl-sign-hash any
+    strict-resume disabled
+    unclean-shutdown enabled
+}
+
+ltm profile http /Common/mtlsExplicit {
+    app-service none
+    defaults-from /Common/http-explicit
+    explicit-proxy {
+        default-connect-handling allow
+        dns-resolver /Common/everything
+    }
+    proxy-type explicit
+}
+
+net dns-resolver /Common/everything {
+    forward-zones {
+        . {
+            nameservers {
+                172.31.0.2:53 { }
+            }
+        }
+    }
+    nameserver-min-rtt 500
+    route-domain /Common/0
+}
+
+
+sys dns {
+    description configured-by-dhcp
+    name-servers { 172.31.0.2 }
+    search { us-west-2.compute.internal }
+}
+
