@@ -91,6 +91,6 @@ openssl s_client -connect 127.0.0.1:3000 -key /root/client_certs/client.key.pem 
 
 ### curl as a test client
 
-curl -vvv  --proxy-cacert cacert.pem -k --proxy "https://proxy.cloudsecurity.ninja:3128" "https://www.google.com"
+curl -vvv  --proxy-cacert cacert.pem --proxy "https://proxy.cloudsecurity.ninja:3128" "https://www.google.com"
 
-curl -vvv --proxy-cert app2.cert.pem --proxy-key app2.key.pem --proxy-cacert cacert.pem -k --proxy "https://proxy.cloudsecurity.ninja:3128" "https://www.f5.com"
+curl -vvv --proxy-cert app2.cert.pem --proxy-key app2.key.pem --proxy-cacert cacert.pem --proxy "https://proxy.cloudsecurity.ninja:3128" "https://www.f5.com"
