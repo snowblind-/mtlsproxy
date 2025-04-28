@@ -1,0 +1,40 @@
+when RULE_INIT {
+  #set 1 to enable logging, 0 to disable
+  set static::debug 1
+  set tag none
+}
+
+when CLIENTSSL_CLIENTCERT {
+    if {[SSL::cert 0] eq ""}{
+         reject 
+    } else { 
+        set subject [X509::subject [SSL::cert 0]]
+        # Set the group variable to the first 3 digits of the certificates
+        # This is controlled by the last statement '] 0 2 ]' below. If you wish to extend it 
+        # the lindex starts at the '0' character and ends at (n-1) characters you wish to extract
+        # For this you must also create a data group of allowed destinations where the datagroup
+        # name is the $group you are planning to match against ('app')
+        set group [string range [lindex [split [lindex [split [lindex [split $subject ","] 4] "="] 1] "."] 0] 0 2]
+        if {$static::debug}{ log local0. "Group name extracted from Subject CN= $group" }
+    }
+}
+
+when HTTP_PROXY_REQUEST {
+    if { [HTTP::method] eq "CONNECT" } {
+        # Extract the destination from the request (host:port)
+        set destination [lindex [split [HTTP::uri] ":"] 0]
+        if {$static::debug}{ log local0. "Extracted destination: $destination" }
+        
+        # Query the Data Group for the website name
+        set result [class match -value $destination eq $group]
+        
+        if { $result == "allow" } {
+        # Website is allowed, proceed with the request
+            if {$static::debug}{ log local0. "Allowed destination: $destination for Subject: $subject" }
+        } else {
+        # Website is not allowed, block the request and log the Client Certificate Subject and Destination
+            log local0. "Denied destination: $destination for Subject: $subject"
+            reject
+        }
+    }
+}
