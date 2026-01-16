@@ -1,0 +1,45 @@
+ltm virtual /Common/explicitProxy {
+    destination /Common/0.0.0.0:8080
+    ip-protocol tcp
+    mask any
+    profiles {
+        /Common/mtlsExplicit { }
+        /Common/tcp { }
+    }
+    serverssl-use-sni disabled
+    source 0.0.0.0/0
+    source-address-translation {
+        type automap
+    }
+    translate-address enabled
+    translate-port enabled
+}
+ltm virtual-address /Common/0.0.0.0 {
+    address any
+    arp disabled
+    icmp-echo disabled
+    mask any
+    traffic-group /Common/traffic-group-1
+}
+
+ltm profile http /Common/mtlsExplicit {
+    app-service none
+    defaults-from /Common/http-explicit
+    explicit-proxy {
+        default-connect-handling allow
+        dns-resolver /Common/everything
+    }
+    proxy-type explicit
+}
+
+net dns-resolver /Common/everything {
+    forward-zones {
+        . {
+            nameservers {
+            206.143.94.16:53 { }
+            }
+        }
+    }
+    nameserver-min-rtt 500
+    route-domain /Common/0
+}
