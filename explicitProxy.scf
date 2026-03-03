@@ -98,7 +98,7 @@ ltm virtual /Common/explicitProxy {
     translate-address enabled
     translate-port enabled
 }
-ltm virtual-address /Common/0.0.0.0 {
+ltm virtual-address /Common/0.0.0.0/0 {
     address any
     arp disabled
     icmp-echo disabled
